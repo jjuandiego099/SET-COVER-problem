@@ -1,0 +1,108 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage{amsmath,amssymb,booktabs,graphicx,hyperref,geometry,float}
+\usepackage[ruled,vlined,linesnumbered]{algorithm2e}
+\geometry{margin=2.5cm}
+
+\title{Problema de Cobertura de Conjuntos (Set Cover):\\
+Soluci\'on exacta mediante programaci\'on entera y Algoritmo Gen\'etico}
+\author{Juan Jose Vargas Correa \and Juan Diego Chaparro Garcia}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Este trabajo aborda el problema de cobertura de conjuntos de costo m\'inimo. Se formula como un
+programa lineal entero binario resuelto con el solver CBC y se compara con un Algoritmo Gen\'etico
+con operador de reparaci\'on. Ambos m\'etodos se eval\'uan sobre las mismas instancias, analizando
+calidad de soluci\'on, tiempo de c\'omputo y comportamiento del algoritmo evolutivo.
+\end{abstract}
+
+\section{Introducci\'on y descripci\'on del problema}
+Dado un universo $U=\{1,\dots,m\}$ y una colecci\'on de subconjuntos $S_1,\dots,S_n\subseteq U$ con
+costos $c_j>0$, el problema consiste en elegir la subcolecci\'on de menor costo cuya uni\'on sea $U$.
+Es uno de los 21 problemas NP-completos de Karp \cite{karp1972,garey1979} y aparece en
+asignaci\'on de personal, localizaci\'on de servicios y dise\~no de redes \cite{caprara2000}.
+% TODO: agregar 1-2 aplicaciones concretas y motivar por qu\'e se compara un m\'etodo exacto con una metaheur\'istica.
+
+\section{Formulaci\'on matem\'atica}
+\paragraph{Datos.} $a_{ij}=1$ si el elemento $i$ pertenece a $S_j$ (0 en otro caso); $c_j$ es el costo de $S_j$.
+\paragraph{Variables de decisi\'on.}
+$x_j\in\{0,1\}$, con $x_j=1$ si se selecciona el subconjunto $S_j$.
+\begin{align}
+\min\quad & \sum_{j=1}^{n} c_j\,x_j \label{eq:obj}\\
+\text{s.a.}\quad & \sum_{j=1}^{n} a_{ij}\,x_j \ge 1, && i=1,\dots,m \label{eq:cover}\\
+& x_j\in\{0,1\}, && j=1,\dots,n \label{eq:bin}
+\end{align}
+La ecuaci\'on~\eqref{eq:obj} minimiza el costo total; las restricciones~\eqref{eq:cover} obligan a que
+cada elemento est\'e cubierto por al menos un subconjunto elegido; \eqref{eq:bin} define la naturaleza
+binaria de las variables \cite{wolsey2020}.
+
+\section{Metodolog\'ia exacta}
+El modelo se implementa en Python con PuLP \cite{mitchell2011pulp} y se resuelve con CBC \cite{cbc},
+un solver de ramificaci\'on y corte (\textit{branch-and-cut}). Se reportan estado, valor objetivo,
+subconjuntos seleccionados y tiempo. % TODO: describir brevemente relajaci\'on LP y branch-and-bound.
+
+\section{Algoritmo Gen\'etico}
+Siguiendo la estructura cl\'asica \cite{holland1975,goldberg1989} y la adaptaci\'on al Set Cover de
+Beasley y Chu \cite{beasley1996}:
+\begin{itemize}
+  \item \textbf{Codificaci\'on:} cromosoma binario $x\in\{0,1\}^n$ (un gen por subconjunto).
+  \item \textbf{Fitness:} costo $f(x)=\sum_j c_jx_j$ (se minimiza). Como todo individuo se repara, siempre es factible y no se requieren penalizaciones.
+  \item \textbf{Inicializaci\'on:} cada gen vale 1 con probabilidad $p_0=0.2$ y luego se aplica reparaci\'on.
+  \item \textbf{Selecci\'on:} torneo de tama\~no $k=3$.
+  \item \textbf{Cruce:} uniforme con probabilidad $p_c=0.9$.
+  \item \textbf{Mutaci\'on:} inversi\'on de bits con probabilidad $p_m=0.02$ por gen.
+  \item \textbf{Reparaci\'on:} (i) \emph{construcci\'on} voraz \cite{chvatal1979}: mientras queden elementos sin cubrir se agrega el subconjunto con menor costo por elemento nuevo cubierto; (ii) \emph{poda}: se eliminan, en orden aleatorio, subconjuntos redundantes.
+  \item \textbf{Elitismo:} los 2 mejores individuos pasan intactos.
+  \item \textbf{Parada:} 200 generaciones o 50 generaciones consecutivas sin mejora.
+\end{itemize}
+\begin{algorithm}[H]
+\caption{Algoritmo Gen\'etico con reparaci\'on}
+Inicializar poblaci\'on $P$ y repararla; evaluar\;
+\While{no se cumpla el criterio de parada}{
+  $P'\leftarrow$ \'elite de $P$\;
+  \While{$|P'|<N$}{
+    Seleccionar padres por torneo; cruzar; mutar; reparar el hijo; agregarlo a $P'$\;
+  }
+  $P\leftarrow P'$; actualizar mejor soluci\'on\;
+}
+\Return mejor soluci\'on\;
+\end{algorithm}
+% TODO: justificar la elecci\'on de parametros (idealmente con un peque\~no estudio de sensibilidad).
+
+\section{Implementaci\'on}
+C\'odigo en Python: \texttt{setcover.py} (instancias, modelo exacto, GA), \texttt{experiments.py}
+(experimentos), \texttt{app.py} (interfaz Streamlit). Dependencias en \texttt{requirements.txt};
+las instancias son reproducibles mediante semillas. % TODO: captura de pantalla de la interfaz.
+
+\section{Experimentos computacionales}
+Se generaron instancias aleatorias de tama\~nos $(m,n)\in\{(30,20),(60,40),(100,80),(150,120),(200,150)\}$,
+densidad 0.10 y costos enteros en $[1,10]$, con 3 instancias por tama\~no. El GA se ejecut\'o 10 veces
+por instancia (semillas 0--9) por su naturaleza estoc\'astica. % TODO: indicar hardware y versiones.
+
+\begin{table}[H]
+\centering\small
+\input{tabla_resultados.tex}
+\caption{Promedios por tama\~no. El gap es $100\,(z_{GA}-z^*)/z^*$; ``\'Optimos'' cuenta las instancias donde el mejor de las 10 corridas alcanz\'o $z^*$.}
+\label{tab:res}
+\end{table}
+
+\section{Comparaci\'on y an\'alisis}
+% TODO: completar con tus resultados reales (Tabla~\ref{tab:res}). Puntos que pide la r\'ubrica:
+% - Calidad: ¿el GA hall\'o el \'optimo? gap promedio y del mejor.
+% - Tiempo: curvas de tiempo vs tama\~no para ambos m\'etodos.
+% - Comportamiento del GA: convergencia (figura de la interfaz), variabilidad entre corridas.
+% - Ventajas/desventajas: garant\'ia de optimalidad y escalabilidad (exacto) frente a flexibilidad y
+%   ausencia de garant\'ias (GA).
+% - Limitaciones: instancias aleatorias de tama\~no moderado; CBC resuelve r\'apido estos casos.
+
+\section{Conclusiones}
+% TODO
+
+\bibliographystyle{plain}
+\bibliography{referencias}
+\end{document}
