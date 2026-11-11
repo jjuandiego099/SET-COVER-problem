@@ -169,7 +169,10 @@ if "out" not in st.session_state:
     st.info("Configura los parámetros y pulsa **Ejecutar ambos métodos**, o abre un caso guardado.")
     with st.expander("📚 Historial de casos guardados", expanded=mode == "Casos guardados"):
         df = storage.summary_table()
-        st.dataframe(df, hide_index=True) if len(df) else st.caption("Sin casos guardados todavía.")
+        if len(df):
+            st.dataframe(df, hide_index=True)
+        else:
+            st.caption("Sin casos guardados todavía.")
     st.stop()
 
 inst, ex, res, meta = st.session_state["out"]
@@ -277,4 +280,7 @@ with tab4:
     st.caption(f"Media {vals.mean():.2f} · desviación {vals.std():.2f} · mín {vals.min():.0f} · máx {vals.max():.0f}")
 with tab5:
     df = storage.summary_table()
-    st.dataframe(df, hide_index=True) if len(df) else st.caption("Sin casos guardados todavía.")
+    if len(df):
+        st.dataframe(df, hide_index=True)
+    else:
+        st.caption("Sin casos guardados todavía.")
