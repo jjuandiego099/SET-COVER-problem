@@ -3,42 +3,106 @@ import numpy as np
 import matplotlib.pyplot as plt
 import streamlit as st
 from setcover import generate_instance, solve_exact, run_ga, GAParams
-import storage
+import json, re, time, types
+from pathlib import Path
+import numpy as np
+import pandas as pd
+from setcover import Instance
+
+DIR = Path(__file__).parent / "cases"
+
+
+def _slug(name):
+    return re.sub(r"[^a-zA-Z0-9_-]+", "_", name.strip()).strip("_") or "caso"
+
+
+def _plain(d):
+    return {k: (v.tolist() if hasattr(v, "tolist") else v) for k, v in d.items()}
+
+
+def save_case(name, desc, inst, ex, res, params):
+    DIR.mkdir(exist_ok=True)
+    data = {"name": name.strip(), "description": desc, "saved": time.strftime("%Y-%m-%d %H:%M"),
+            "params": params, "A": inst.A.tolist(), "c": inst.c.tolist(),
+            "exact": _plain(ex), "ga": [_plain(r) for r in res]}
+    (DIR / f"{_slug(name)}.json").write_text(json.dumps(data), encoding="utf8")
+    return _slug(name)
+
+
+def list_cases():
+    """Lista de (clave, nombre) ordenada por nombre."""
+    out = []
+    for f in sorted(DIR.glob("*.json")) if DIR.exists() else []:
+        try:
+            out.append((f.stem, json.loads(f.read_text(encoding="utf8"))["name"]))
+        except Exception:
+            pass
+    return sorted(out, key=lambda t: t[1].lower())
+
+
+def load_case(key):
+    d = json.loads((DIR / f"{key}.json").read_text(encoding="utf8"))
+    inst = Instance(A=np.array(d["A"], dtype=np.int8), c=np.array(d["c"], dtype=float))
+    ex = d["exact"]
+    ex["solution"] = np.array(ex["solution"])
+    meta = {"name": d["name"], "description": d.get("description", ""),
+            "saved": d["saved"], "params": d["params"]}
+    return inst, ex, d["ga"], meta
+
+
+def delete_case(key):
+    (DIR / f"{key}.json").unlink(missing_ok=True)
+
+
+def summary_table():
+    rows = []
+    for key, _ in list_cases():
+        inst, ex, res, meta = load_case(key)
+        best = min(r["objective"] for r in res)
+        mean = float(np.mean([r["objective"] for r in res]))
+        rows.append({"Caso": meta["name"], "m": inst.m, "n": inst.n,
+                     "Óptimo exacto": ex["objective"], "t exacto (s)": round(ex["time"], 3),
+                     "GA mejor": best, "GA prom.": round(mean, 2),
+                     "Gap prom. (%)": round(100 * (mean - ex["objective"]) / ex["objective"], 2),
+                     "t GA (s)": round(float(np.mean([r["time"] for r in res])), 3),
+                     "Guardado": meta["saved"]})
+    return pd.DataFrame(rows)
+
+
+def import_case(raw_bytes):
+    """Importa un caso desde el contenido de un .json exportado por la app."""
+    d = json.loads(raw_bytes)
+    for k in ("name", "A", "c", "exact", "ga", "params", "saved"):
+        if k not in d:
+            raise ValueError(f"Falta el campo {k}")
+    DIR.mkdir(exist_ok=True)
+    (DIR / f"{_slug(d['name'])}.json").write_text(json.dumps(d), encoding="utf8")
+    return _slug(d["name"])
+
+
+storage = types.SimpleNamespace(save_case=save_case, list_cases=list_cases, load_case=load_case,
+                                delete_case=delete_case, summary_table=summary_table,
+                                import_case=import_case, slug=_slug, DIR=DIR)
 
 BLUE, SKY, NAVY, ICE = "#1d4ed8", "#38bdf8", "#0b1e3f", "#e3ecfc"
-plt.rcParams.update({"axes.spines.top": False, "axes.spines.right": False, "axes.edgecolor": "#9fb3d9",
-                     "axes.labelcolor": NAVY, "text.color": NAVY, "xtick.color": NAVY, "ytick.color": NAVY,
-                     "figure.facecolor": "none", "axes.facecolor": "none", "axes.titleweight": "bold",
-                     "font.size": 9, "axes.grid": True, "grid.color": "#d3e0f7", "grid.linewidth": 0.6})
 
-st.set_page_config(page_title="Set Cover Lab", page_icon="🔷", layout="wide")
+try:  # color primario azul (en vez del rojo por defecto) sin archivo de configuración
+    st._config.set_option("theme.primaryColor", BLUE)
+except Exception:
+    pass
+st.set_page_config(page_title="Set Cover: Exacto vs GA", layout="wide")
 st.markdown(f"""
 <style>
-.stApp {{background: #f4f8ff; color: {NAVY};}}
-.stApp h1, .stApp h2, .stApp h3, .stApp label, .stApp p {{color: {NAVY};}}
-[data-testid="stSidebar"] {{background: {ICE};}}
+[data-testid="stBaseButton-primary"], .stButton > button[kind="primary"] {{
+    background-color: {BLUE}; border-color: {BLUE}; color: white;}}
+[data-testid="stBaseButton-primary"]:hover, .stButton > button[kind="primary"]:hover {{
+    background-color: #1e40af; border-color: #1e40af; color: white;}}
 div[data-baseweb="slider"] [role="slider"] {{background-color: {BLUE} !important;}}
-.stTabs [aria-selected="true"] {{color: {BLUE};}}
 [data-baseweb="tab-highlight"] {{background-color: {BLUE} !important;}}
-.hero {{background: linear-gradient(115deg, {NAVY} 0%, {BLUE} 62%, {SKY} 100%); color: white;
-        padding: 1.5rem 2rem; border-radius: 20px; margin-bottom: 1.1rem;
-        box-shadow: 0 8px 24px rgba(29,78,216,.25);}}
-.hero h1 {{color: white !important; margin: 0; font-size: 2rem; letter-spacing: -.5px;}}
-.hero p {{color: #d6e6ff !important; margin: .3rem 0 0 0;}}
-[data-testid="stMetric"] {{background: white; border: 1px solid #cddcf7; border-left: 6px solid {BLUE};
-        border-radius: 14px; padding: .8rem 1rem; box-shadow: 0 3px 10px rgba(29,78,216,.08);}}
-.stButton > button[kind="primary"] {{background: linear-gradient(90deg, {BLUE}, #2563eb); border: 0;
-        border-radius: 12px; font-weight: 700; padding: .55rem 1.2rem;}}
-.stTabs [data-baseweb="tab"] {{font-weight: 600; border-radius: 10px 10px 0 0;}}
-.verdict {{background: white; border: 1px solid #cddcf7; border-left: 8px solid {BLUE}; border-radius: 14px;
-        padding: 1rem 1.3rem; margin: .8rem 0; box-shadow: 0 3px 10px rgba(29,78,216,.08);}}
-.verdict h3 {{margin: 0 0 .4rem 0; color: {BLUE};}}
-.tag {{display:inline-block; background:{ICE}; color:{BLUE}; border-radius:20px; padding:.1rem .7rem;
-        font-size:.8rem; font-weight:600; margin-right:.4rem;}}
+.stTabs [aria-selected="true"] {{color: {BLUE};}}
 </style>
-<div class="hero"><h1>🔷 Set Cover Lab</h1>
-<p>Solver exacto (CBC) frente a Algoritmo Genético · compara, guarda y reabre tus casos</p></div>
 """, unsafe_allow_html=True)
+st.title("Set Cover: método exacto vs Algoritmo Genético")
 
 # ------------------------------------------------------------------ Sidebar
 mode = st.sidebar.radio("Modo", ["Nuevo caso", "Casos guardados"], horizontal=True)
@@ -83,10 +147,23 @@ else:
         c1, c2 = st.sidebar.columns(2)
         if c1.button("📂 Abrir", type="primary"):
             st.session_state["out"] = storage.load_case(sel)
+        st.sidebar.download_button("⬇ Descargar caso (.json)", data=(storage.DIR / f"{sel}.json").read_bytes(),
+                                   file_name=f"{sel}.json", mime="application/json")
         if c2.button("🗑 Eliminar"):
             storage.delete_case(sel)
             st.session_state.pop("out", None)
             st.rerun()
+
+if mode == "Casos guardados":
+    up = st.sidebar.file_uploader("Importar caso (.json)", type="json")
+    if up is not None and st.session_state.get("_imp") != (up.name, up.size):
+        try:
+            storage.import_case(up.getvalue())
+            st.session_state["_imp"] = (up.name, up.size)
+            st.toast("Caso importado ✅")
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"No se pudo importar: {e}")
 
 if "out" not in st.session_state:
     st.info("Configura los parámetros y pulsa **Ejecutar ambos métodos**, o abre un caso guardado.")
@@ -106,10 +183,11 @@ proven = ex["status"] == "Optimal"
 
 # ------------------------------------------------------------------ Guardar / info del caso
 if meta.get("saved"):
-    st.markdown(f"<span class='tag'>Caso: {meta['name']}</span><span class='tag'>Guardado {meta['saved']}</span>"
-                f"<span class='tag'>{inst.m}×{inst.n}</span>", unsafe_allow_html=True)
+    st.caption(f"Caso: {meta['name']} · guardado {meta['saved']} · {inst.m}×{inst.n}")
     if meta.get("description"):
         st.caption(meta["description"])
+    st.download_button("⬇ Descargar este caso (.json)", data=(storage.DIR / f"{storage.slug(meta['name'])}.json").read_bytes(),
+                       file_name=f"{storage.slug(meta['name'])}.json", mime="application/json")
     with st.expander("Parámetros usados"):
         st.json(meta["params"])
 else:
@@ -155,10 +233,10 @@ elif rapido == "Exacto":
     ganador = "Mejor método: Exacto (misma calidad, más rápido" + (" y óptimo garantizado)" if proven else ")")
 else:
     ganador = "Empate en calidad · el GA fue más rápido" + (" (el exacto garantiza optimalidad)" if proven else "")
-st.markdown(f"<div class='verdict'><h3>🏆 {ganador}</h3>• <b>Calidad:</b> {txt_cal}<br>"
-            f"• <b>Tiempo:</b> {txt_tim}<br><small>Vale solo para esta instancia y estos parámetros; con "
-            f"instancias mayores o límites de tiempo ajustados puede cambiar. El tiempo del exacto incluye "
-            f"el arranque de CBC.</small></div>", unsafe_allow_html=True)
+st.info(f"🏆 **{ganador}**")
+st.markdown(f"- **Calidad:** {txt_cal}\n- **Tiempo:** {txt_tim}")
+st.caption("Vale solo para esta instancia y estos parámetros; con instancias mayores o límites de tiempo "
+           "ajustados puede cambiar. El tiempo del exacto incluye el arranque de CBC.")
 
 # ------------------------------------------------------------------ Pestañas
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Comparación", "Convergencia", "Solución y cobertura",
